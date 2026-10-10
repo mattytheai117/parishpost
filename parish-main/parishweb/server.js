@@ -868,11 +868,11 @@ app.get('/api/services/:serviceId/slots', async (req, res) => {
       `, [numericServiceId]);
 
       if (policy.quota) {
-        const quotaResult = await pool.query(`SELECT CONVERT(varchar(10), ScheduledDate, 23) AS scheduledDate, COUNT(*) AS total FROM "ServiceRequest" WHERE ServiceId=$1 AND Status IN ('PendingVerification','Confirmed') GROUP BY ScheduledDate`, [numericServiceId]);
+        const quotaResult = await pool.query(`SELECT "ScheduledDate"::date::text AS scheduledDate, COUNT(*) AS total FROM "ServiceRequest" WHERE "ServiceId"=$1 AND "Status" IN ('PendingVerification','Confirmed') GROUP BY "ScheduledDate"::date`, [numericServiceId]);
         quotaFullDates = new Set(quotaResult.rows.filter(row => Number(row.total) >= policy.quota).map(row => row.scheduledDate));
       }
 
-      const blockResult = await pool.query(`SELECT CONVERT(varchar(10), BlockDate, 23) AS blockDate, BlockTime, Reason FROM "BlockedSlots" WHERE BlockDate >= CAST(SYSUTCDATETIME() AS date) AND (Scope='All' OR (Scope='Service' AND ServiceId=$1))`, [numericServiceId]);
+      const blockResult = await pool.query(`SELECT "BlockDate"::date::text AS blockDate, "BlockTime", "Reason" FROM "BlockedSlots" WHERE "BlockDate" >= CURRENT_DATE AND ("Scope"='All' OR ("Scope"='Service' AND "ServiceId"=$1))`, [numericServiceId]);
       blocks = blockResult.rows;
 
       bookedSet = new Set(bookedResult.rows.map((row) => {
@@ -2942,7 +2942,7 @@ const BLOCK_SCOPES = ['All', 'Service', 'Certificate'];
 
 app.get('/api/blocked-slots', async (_req, res) => {
   try {
-    const result = await getPool().query(`SELECT CONVERT(varchar(10), BlockDate, 23) AS date, BlockTime AS time, Scope AS scope, ServiceId AS serviceId, Reason AS reason FROM "BlockedSlots" WHERE BlockDate >= CAST(SYSUTCDATETIME() AS date)`);
+    const result = await getPool().query(`SELECT "BlockDate"::date::text AS date, "BlockTime" AS time, "Scope" AS scope, "ServiceId" AS serviceId, "Reason" AS reason FROM "BlockedSlots" WHERE "BlockDate" >= CURRENT_DATE`);
     res.json(result.rows);
   } catch (error) {
     logError(error, { context: 'publicBlockedSlots' });
@@ -2953,9 +2953,9 @@ app.get('/api/blocked-slots', async (_req, res) => {
 app.get('/api/admin/blocked-slots', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
   try {
     const result = await getPool().query(`
-      SELECT b.BlockedSlotId AS id, CONVERT(varchar(10), b.BlockDate, 23) AS date, b.BlockTime AS time,
-             b.Scope AS scope, b.ServiceId AS serviceId, s.Name AS serviceName, b.Reason AS reason,
-             b.CreatedBy AS createdBy, b.CreatedAt AS createdAt
+      SELECT b."BlockedSlotId" AS id, b."BlockDate"::date::text AS date, b."BlockTime" AS time,
+             b."Scope" AS scope, b."ServiceId" AS serviceId, s."Name" AS serviceName, b."Reason" AS reason,
+             b."CreatedBy" AS createdBy, b."CreatedAt" AS createdAt
       FROM "BlockedSlots" b LEFT JOIN "Service" s ON s."ServiceId" = b."ServiceId"
       WHERE b."BlockDate" >= CURRENT_DATE
       ORDER BY b."BlockDate", b."BlockTime"`);
