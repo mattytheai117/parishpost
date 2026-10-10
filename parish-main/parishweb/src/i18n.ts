@@ -456,7 +456,6 @@ const tagalogTranslations: Record<string, string> = {
   'Notes cannot exceed 500 characters.': 'Hindi maaaring lumampas sa 500 karakter ang mga tala.',
   'files selected': 'mga file ang napili',
   'Choose files': 'Pumili ng mga file',
-  'Submitting…': 'Isinusumite…',
   'you@example.com': 'ikaw@halimbawa.com',
   '09XX-XXX-XXXX': '09XX-XXX-XXXX',
   'Any additional information': 'Anumang karagdagang impormasyon',
@@ -472,9 +471,6 @@ const tagalogTranslations: Record<string, string> = {
   'Private': 'Pribado',
   'Anonymous': 'Hindi kilala',
   'Pending approval': 'Naghihintay ng pag-apruba',
-
-  // EventDetailsModal
-  'Detail': 'Detalye',
 }
 
 const textMap = new Map(Object.entries(tagalogTranslations))
