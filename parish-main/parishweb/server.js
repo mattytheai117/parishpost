@@ -1069,9 +1069,9 @@ app.post('/api/service-requests', async (req, res) => {
       `, [firstName, lastName, address || null, email, mobileNumber || null, parishionerId]);
     } else {
       const insertResult = await pool.query(`
-        INSERT INTO "Parishioners" (FirstName, LastName, EmailAddress, MobileNumber, Address, CreatedAt)
-        OUTPUT INSERTED.ParishionerId
-        VALUES ($1, $2, $3, $4, $5, GETDATE())
+        INSERT INTO "Parishioners" ("FirstName", "LastName", "EmailAddress", "MobileNumber", "Address", "CreatedAt")
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        RETURNING "ParishionerId"
       `, [firstName, lastName, email, mobileNumber || null, address || null]);
       parishionerId = insertResult.rows[0].ParishionerId;
     }
@@ -2974,7 +2974,7 @@ app.post('/api/admin/blocked-slots', requireAdmin, requireRole(['ParishPriest', 
   const numericServiceId = scope === 'Service' ? Number(serviceId) : null;
   if (scope === 'Service' && (!Number.isInteger(numericServiceId) || numericServiceId <= 0)) return res.status(400).json({ message: 'Please choose a service.' });
   try {
-    const result = await getPool().query(`INSERT INTO "BlockedSlots" (BlockDate, BlockTime, Scope, ServiceId, Reason, CreatedBy) OUTPUT INSERTED.BlockedSlotId AS id VALUES ($1, $2, $3, $4, $5, $6)`, [date, time || null, scope, numericServiceId, reason ? String(reason).trim().slice(0, 300) : null, String(req.staff?.email || req.staff?.userId || '').slice(0, 100)]);
+    const result = await getPool().query(`INSERT INTO "BlockedSlots" ("BlockDate", "BlockTime", "Scope", "ServiceId", "Reason", "CreatedBy") VALUES ($1, $2, $3, $4, $5, $6) RETURNING "BlockedSlotId" AS id`, [date, time || null, scope, numericServiceId, reason ? String(reason).trim().slice(0, 300) : null, String(req.staff?.email || req.staff?.userId || '').slice(0, 100)]);
     res.status(201).json({ id: result.rows[0].id });
   } catch (error) {
     logError(error, { context: 'createBlockedSlot' });
@@ -3086,7 +3086,7 @@ app.put('/api/admin/certificate-requests/:requestId', requireAdmin, requireRole(
       }
     }
     await getPool().query(`
-      UPDATE "CertificateRequests" SET Status = $2, UpdatedAt = SYSUTCDATETIME() WHERE CertificateRequestId = $1
+      UPDATE "CertificateRequests" SET "Status" = $2, "UpdatedAt" = NOW() WHERE "CertificateRequestId" = $1
     `, [requestId, req.body.status]);
     res.json({ message: 'Certificate request updated.' });
   } catch (error) {
