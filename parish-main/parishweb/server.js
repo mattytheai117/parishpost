@@ -777,22 +777,22 @@ function isFutureDate(dateStr) {
 }
 
 async function getServicePolicy(pool, serviceId, scheduledDate) {
-  const result = await pool.query('SELECT Name FROM "Service" WHERE ServiceId=$1', [serviceId]);
+  const result = await pool.query('SELECT "Name" FROM "Service" WHERE "ServiceId"=$1', [serviceId]);
   const service = result.rows[0];
   return { name: service?.Name || '', ...servicePolicy(service?.Name, scheduledDate) };
 }
 
 async function quotaCount(pool, serviceId, scheduledDate) {
-  const result = await pool.query(`SELECT COUNT(*) AS total FROM "ServiceRequest" WHERE ServiceId=$1 AND ScheduledDate=$2 AND Status IN ('PendingVerification','Confirmed')`, [serviceId, scheduledDate]);
+  const result = await pool.query(`SELECT COUNT(*) AS total FROM "ServiceRequest" WHERE "ServiceId"=$1 AND "ScheduledDate"=$2 AND "Status" IN ('PendingVerification','Confirmed')`, [serviceId, scheduledDate]);
   return Number(result.rows[0]?.total || 0);
 }
 
 // Returns the first admin block covering this date/time, or null. A null BlockTime blocks the whole day.
 async function findBlockedSlot(pool, { date, time, serviceId = null, certificate = false }) {
-  const result = await pool.query(`SELECT Reason FROM "BlockedSlots"
-      WHERE BlockDate=$1
-        AND (BlockTime IS NULL OR BlockTime=$2)
-        AND (Scope='All' OR (Scope='Certificate' AND $4=1) OR (Scope='Service' AND ServiceId=$3))`, [date, time ? String(time).slice(0, 5) : null, serviceId, certificate ? 1 : 0]);
+  const result = await pool.query(`SELECT "Reason" FROM "BlockedSlots"
+      WHERE "BlockDate"=$1
+        AND ("BlockTime" IS NULL OR "BlockTime"=$2)
+        AND ("Scope"='All' OR ("Scope"='Certificate' AND $4=1) OR ("Scope"='Service' AND "ServiceId"=$3))`, [date, time ? String(time).slice(0, 5) : null, serviceId, certificate ? 1 : 0]);
   return result.rows[0] || null;
 }
 
@@ -819,10 +819,10 @@ app.get('/api/services', async (_req, res) => {
   try {
     const pool = getPool();
     const result = await pool.query(`
-      SELECT ServiceId, Name, Description
+      SELECT "ServiceId", "Name", "Description"
       FROM "Service"
-      WHERE IsActive = 1
-      ORDER BY Name
+      WHERE "IsActive" = TRUE
+      ORDER BY "Name"
     `);
 
     const services = result.rows.map(row => ({
@@ -978,10 +978,10 @@ app.get('/api/services/:serviceId/fields', async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.query(`
-      SELECT FieldKey, Label, FieldType, OptionsJson, IsRequired, SortOrder
+      SELECT "FieldKey", "Label", "FieldType", "OptionsJson", "IsRequired", "SortOrder"
       FROM "ServiceFieldDefinition"
-      WHERE ServiceId = $1 AND IsActive = 1
-      ORDER BY SortOrder, FieldDefinitionId
+      WHERE "ServiceId" = $1 AND "IsActive" = TRUE
+      ORDER BY "SortOrder", "FieldDefinitionId"
     `, [numericServiceId]);
     const fields = result.rows.map(row => ({
       key: row.FieldKey,
@@ -2198,10 +2198,10 @@ app.get('/api/admin/service-requests', requireAdmin, requireRole(['ParishPriest'
 app.get('/api/admin/service-fields', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (_req, res) => {
   try {
     const result = await getPool().query(`
-      SELECT f.FieldDefinitionId, f.ServiceId, s.Name AS ServiceName, f.FieldKey, f.Label, f.FieldType, f.OptionsJson, f.IsRequired, f.SortOrder, f.IsActive
+      SELECT f."FieldDefinitionId", f."ServiceId", s."Name" AS "ServiceName", f."FieldKey", f."Label", f."FieldType", f."OptionsJson", f."IsRequired", f."SortOrder", f."IsActive"
       FROM "ServiceFieldDefinition" f
-      JOIN "Service" s ON s.ServiceId = f.ServiceId
-      ORDER BY s.Name, f.SortOrder, f.FieldDefinitionId
+      JOIN "Service" s ON s."ServiceId" = f."ServiceId"
+      ORDER BY s."Name", f."SortOrder", f."FieldDefinitionId"
     `);
     res.json(result.rows.map(row => ({
       id: row.FieldDefinitionId,
@@ -2229,9 +2229,9 @@ app.post('/api/admin/service-fields', requireAdmin, requireRole(['ParishPriest',
   }
   try {
     const result = await getPool().query(`
-        INSERT INTO "ServiceFieldDefinition" (ServiceId, FieldKey, Label, FieldType, OptionsJson, IsRequired, SortOrder)
-        RETURNING "FieldDefinitionId"
+        INSERT INTO "ServiceFieldDefinition" ("ServiceId", "FieldKey", "Label", "FieldType", "OptionsJson", "IsRequired", "SortOrder")
         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING "FieldDefinitionId"
       `, [numericServiceId, String(key), String(label), String(type || 'text'), Array.isArray(options) ? JSON.stringify(options) : null, !!required, Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0]);
     res.status(201).json({ id: result.rows[0].FieldDefinitionId });
   } catch (error) {
@@ -2249,8 +2249,8 @@ app.put('/api/admin/service-fields/:id', requireAdmin, requireRole(['ParishPries
   try {
     await getPool().query(`
         UPDATE "ServiceFieldDefinition"
-        SET Label = $2, FieldType = $3, OptionsJson = $4, IsRequired = $5, SortOrder = $6, IsActive = $7
-        WHERE FieldDefinitionId = $1
+        SET "Label" = $2, "FieldType" = $3, "OptionsJson" = $4, "IsRequired" = $5, "SortOrder" = $6, "IsActive" = $7
+        WHERE "FieldDefinitionId" = $1
       `, [id, String(label), String(type || 'text'), Array.isArray(options) ? JSON.stringify(options) : null, !!required, Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0, active === undefined ? true : !!active]);
     res.json({ message: 'Field definition updated.' });
   } catch (error) {
@@ -2265,7 +2265,7 @@ app.delete('/api/admin/service-fields/:id', requireAdmin, requireRole(['ParishPr
     return res.status(400).json({ message: 'Invalid field definition ID.' });
   }
   try {
-    await getPool().query('DELETE FROM "ServiceFieldDefinition" WHERE FieldDefinitionId=$1', [id]);
+    await getPool().query('DELETE FROM "ServiceFieldDefinition" WHERE "FieldDefinitionId"=$1', [id]);
     res.json({ message: 'Field definition deleted.' });
   } catch (error) {
     console.error('Field definition delete error:', error);

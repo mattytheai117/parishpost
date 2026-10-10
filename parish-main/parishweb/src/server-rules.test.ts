@@ -26,6 +26,20 @@ describe('PostgreSQL scheduled queries', () => {
     expect(server).toContain(`WHERE "ServiceRequestId"=$1 AND "Status"='Confirmed'`);
     expect(server).toContain(`WHERE "ServiceRequestId"=$1 AND "Status"='PendingVerification'`);
   });
+
+  it('quotes service and service-field identifiers in public booking queries', () => {
+    expect(server).toContain(`SELECT "Name" FROM "Service" WHERE "ServiceId"=$1`);
+    expect(server).toContain(`SELECT "ServiceId", "Name", "Description"`);
+    expect(server).toContain(`WHERE "IsActive" = TRUE`);
+    expect(server).toContain(`SELECT "FieldKey", "Label", "FieldType", "OptionsJson", "IsRequired", "SortOrder"`);
+    expect(server).toContain(`WHERE "ServiceId" = $1 AND "IsActive" = TRUE`);
+  });
+
+  it('quotes service-field identifiers in admin CRUD queries', () => {
+    expect(server).toContain(`INSERT INTO "ServiceFieldDefinition" ("ServiceId", "FieldKey", "Label", "FieldType", "OptionsJson", "IsRequired", "SortOrder")`);
+    expect(server).toContain(`SET "Label" = $2, "FieldType" = $3, "OptionsJson" = $4, "IsRequired" = $5, "SortOrder" = $6, "IsActive" = $7`);
+    expect(server).toContain(`DELETE FROM "ServiceFieldDefinition" WHERE "FieldDefinitionId"=$1`);
+  });
 });
 
 describe('servicePolicy', () => {
