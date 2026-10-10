@@ -1277,7 +1277,7 @@ app.get('/api/vatican-news', async (_req, res) => {
 app.get('/api/events', async (_req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.query(`SELECT * FROM "Events" ORDER BY EventDate`);
+    const result = await pool.query(`SELECT * FROM "Events" ORDER BY "EventDate"`);
 
     const events = result.rows
       .map((row, index) => {
@@ -1503,7 +1503,7 @@ app.get('/api/site-content/:page', async (req, res) => {
   }
 
   try {
-    const result = await getPool().query('SELECT ContentJson FROM "SiteContent" WHERE ContentKey = $1', [page]);
+    const result = await getPool().query('SELECT "ContentJson" FROM "SiteContent" WHERE "ContentKey" = $1', [page]);
     const stored = result.rows[0]?.ContentJson;
     return res.json({ content: stored ? JSON.parse(stored) : null });
   } catch (error) {
@@ -2356,7 +2356,7 @@ const sqlBitToBoolean = (value) => {
 
 app.get('/api/admin/operations/schedule', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper', 'Staff']), async (_req, res) => {
   try {
-    const result = await getPool().query(`SELECT MassScheduleId AS id, Title AS title, MassDate AS date, MassTime AS time, Location AS location, PriestUsername AS priestUsername, Notes AS notes, Status AS status FROM "MassSchedule" ORDER BY MassDate, MassTime`);
+    const result = await getPool().query(`SELECT "MassScheduleId" AS id, "Title" AS title, "MassDate" AS date, "MassTime" AS time, "Location" AS location, "PriestUsername" AS priestUsername, "Notes" AS notes, "Status" AS status FROM "MassSchedule" ORDER BY "MassDate", "MassTime"`);
     res.json(result.rows);
   } catch (error) { logError(error, { context: 'operationSchedule' }); res.status(500).json({ message: 'Unable to load schedules.' }); }
 });
@@ -2399,7 +2399,7 @@ app.delete('/api/admin/operations/schedule/:id', requireAdmin, requireRole(['Par
 });
 
 app.get('/api/admin/operations/mass-intentions', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (_req, res) => {
-  try { const result = await getPool().query('SELECT * FROM "MassIntentions" ORDER BY IntentionDate, IntentionTime'); res.json(result.rows); } catch (error) { logError(error, { context: 'massIntentions' }); res.status(500).json({ message: 'Unable to load Mass intentions.' }); }
+  try { const result = await getPool().query('SELECT * FROM "MassIntentions" ORDER BY "IntentionDate", "IntentionTime"'); res.json(result.rows); } catch (error) { logError(error, { context: 'massIntentions' }); res.status(500).json({ message: 'Unable to load Mass intentions.' }); }
 });
 
 app.post('/api/admin/operations/mass-intentions', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
