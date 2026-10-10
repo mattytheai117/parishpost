@@ -32,7 +32,10 @@ let pool = null;
 
 async function initializePool() {
   if (pool) return pool;
-  pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'true' },
+  });
   pool.on('error', (err) => { console.error('Pool error:', err); });
   const client = await pool.connect();
   client.release();
@@ -176,7 +179,7 @@ const createVerificationToken = async (requestId) => {
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
     await pool.query(`
-      INSERT INTO "VerificationTokens" (Token, ServiceRequestId, ExpiresAt)
+      INSERT INTO "VerificationTokens" ("Token", "ServiceRequestId", "ExpiresAt")
       VALUES ($1, $2, $3)
     `, [token, requestId, expiresAt]);
     return token;
@@ -1039,7 +1042,7 @@ app.post('/api/service-requests', async (req, res) => {
     if (policy.quota && await quotaCount(pool, numericServiceId, scheduledDate) >= policy.quota) {
       return res.status(409).json({ message: `${policy.quotaLabel} bookings are limited to ${policy.quota} per day.` });
     }
-    const booked = await pool.query(`SELECT TOP 1 ServiceRequestId FROM "ServiceRequest" WHERE ServiceId=$1 AND ScheduledDate=$2 AND ScheduledTime=$3 AND Status IN ('PendingVerification','Confirmed')`, [numericServiceId, scheduledDate, scheduledTime]);
+    const booked = await pool.query(`SELECT "ServiceRequestId" FROM "ServiceRequest" WHERE "ServiceId"=$1 AND "ScheduledDate"=$2 AND "ScheduledTime"=$3 AND "Status" IN ('PendingVerification','Confirmed') LIMIT 1`, [numericServiceId, scheduledDate, scheduledTime]);
     if (booked.rows.length) return res.status(409).json({ message: 'That appointment slot is already booked.' });
 
     // Step 1: Check if parishioner exists
@@ -1557,7 +1560,7 @@ app.post('/api/contact', contactRateLimit, async (req, res) => {
   }
 
   try {
-    await getPool().query('INSERT INTO "ContactMessages" (Name, Email, Phone, Message) VALUES ($1, $2, $3, $4)', [name, email, phone || null, message]);
+    await getPool().query('INSERT INTO "ContactMessages" ("Name", "Email", "Phone", "Message") VALUES ($1, $2, $3, $4)', [name, email, phone || null, message]);
     return res.json({ success: true });
   } catch (error) {
     logError(error, { context: 'submitContactMessage' });
@@ -1569,9 +1572,9 @@ app.post('/api/contact', contactRateLimit, async (req, res) => {
 app.get('/api/admin/contact-messages', requireAdmin, requireRole(staffRolePriority), async (_req, res) => {
   try {
     const result = await getPool().query(`
-      SELECT ContactMessageId, Name, Email, Phone, Message, IsRead, CreatedAt
+      SELECT "ContactMessageId", "Name", "Email", "Phone", "Message", "IsRead", "CreatedAt"
       FROM "ContactMessages"
-      ORDER BY CreatedAt DESC
+      ORDER BY "CreatedAt" DESC
     `);
     return res.json(result.rows.map(row => ({
       id: row.ContactMessageId,
@@ -1594,7 +1597,7 @@ app.patch('/api/admin/contact-messages/:id', requireAdmin, requireRole(staffRole
     return res.status(400).json({ message: 'Invalid request.' });
   }
   try {
-    await getPool().query('UPDATE "ContactMessages" SET "IsRead" = $2 WHERE ContactMessageId = $1', [id, req.body.isRead ? 1 : 0]);
+    await getPool().query('UPDATE "ContactMessages" SET "IsRead" = $2 WHERE "ContactMessageId" = $1', [id, req.body.isRead]);
     return res.json({ success: true });
   } catch (error) {
     logError(error, { context: 'updateContactMessage' });
@@ -1608,7 +1611,7 @@ app.delete('/api/admin/contact-messages/:id', requireAdmin, requireRole(['Parish
     return res.status(400).json({ message: 'Invalid request.' });
   }
   try {
-    await getPool().query('DELETE FROM "ContactMessages" WHERE ContactMessageId = $1', [id]);
+    await getPool().query('DELETE FROM "ContactMessages" WHERE "ContactMessageId" = $1', [id]);
     return res.json({ success: true });
   } catch (error) {
     logError(error, { context: 'deleteContactMessage' });
@@ -1795,7 +1798,7 @@ app.get('/api/admin/users', requireAdmin, requireRole(['Admin', 'ParishPriest', 
   try {
     const result = await getPool().query(`
       SELECT u."UserId" AS userId, u."UserName" AS userName,
-        CASE WHEN $1 = 1 THEN u."EmailAddress" ELSE NULL END AS email,
+        CASE WHEN $1 THEN u."EmailAddress" ELSE NULL END AS email,
         u."EmailConfirmed" AS emailConfirmed, FALSE AS lockoutEnabled,
         0 AS accessFailedCount, COALESCE(r."Name", 'Staff') AS roleName
       FROM "AspNetUsers" u
@@ -1825,7 +1828,7 @@ app.get('/api/admin/users', requireAdmin, requireRole(['Admin', 'ParishPriest', 
 });
 
 app.get('/api/admin/audit/user-management', requireAdmin, requireRole(['Admin']), async (req, res) => {
-  try { const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100)); const result = await getPool().query('SELECT * FROM "UserManagementAudit" ORDER BY ChangedAt DESC', [limit]); res.json(result.rows); } catch (error) { logError(error, { context: 'userAudit' }); res.status(500).json({ message: 'Unable to load user audit history.' }); }
+  try { const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100)); const result = await getPool().query('SELECT * FROM "UserManagementAudit" ORDER BY "ChangedAt" DESC LIMIT $1', [limit]); res.json(result.rows); } catch (error) { logError(error, { context: 'userAudit' }); res.status(500).json({ message: 'Unable to load user audit history.' }); }
 });
 
 app.post('/api/admin/users', requireAdmin, requireRole(['Admin']), async (req, res) => {
@@ -2091,34 +2094,34 @@ app.get('/api/admin/service-requests', requireAdmin, requireRole(['ParishPriest'
     // Prefer ContactSnapshot columns if populated, fallback to Parishioner columns for legacy rows
     const result = await pool.query(`
       SELECT
-        sr.ServiceRequestId,
-        sr.ParishionerId,
-        sr.ServiceId,
-        sr.ScheduledDate,
-        sr.ScheduledTime,
-        sr.Status,
-        sr.Notes,
-        sr.CreatedAt,
-        bd.ChildFirstName, bd.ChildMiddleName, bd.ChildLastName, bd.ChildDateOfBirth, bd.PlaceOfBirth, bd.FatherFullName, bd.MotherFullName, bd.GodfatherName, bd.GodmotherName, bd.ExtraFieldsJson AS BaptismExtraFields,
-        md.GroomFirstName, md.GroomMiddleName, md.GroomLastName, md.GroomAge, md.BrideFirstName, md.BrideMiddleName, md.BrideLastName, md.BrideAge, md.CenomarNumber, md.Witnesses, md.ExtraFieldsJson AS MarriageExtraFields,
-        cd.CandidateFirstName, cd.CandidateMiddleName, cd.CandidateLastName, cd.CandidateDateOfBirth, cd.SponsorName, cd.ParishOfBaptism, cd.ExtraFieldsJson AS ConfirmationExtraFields,
-        fd.DeceasedFirstName, fd.DeceasedMiddleName, fd.DeceasedLastName, fd.DateOfDeath, fd.RelationshipToDeceased, fd.PlaceOfWake, fd.ExtraFieldsJson AS FuneralExtraFields,
-        hd.FullAddress AS HouseBlessingFullAddress, hd.Landmark AS HouseBlessingLandmark, hd.PreferredContactPerson AS HouseBlessingPreferredContactPerson, hd.ExtraFieldsJson AS HouseBlessingExtraFields,
-        COALESCE(sr.ContactFirstName, p.FirstName) as FirstName,
-        COALESCE(sr.ContactLastName, p.LastName) as LastName,
-        COALESCE(sr.ContactEmail, p.EmailAddress) as EmailAddress,
-        COALESCE(sr.ContactMobile, p.MobileNumber) as MobileNumber,
-        COALESCE(sr.ContactAddress, p.Address) as Address,
-        s.Name as ServiceName
+        sr."ServiceRequestId",
+        sr."ParishionerId",
+        sr."ServiceId",
+        sr."ScheduledDate",
+        sr."ScheduledTime",
+        sr."Status",
+        sr."Notes",
+        sr."CreatedAt",
+        bd."ChildFirstName", bd."ChildMiddleName", bd."ChildLastName", bd."ChildDateOfBirth", bd."PlaceOfBirth", bd."FatherFullName", bd."MotherFullName", bd."GodfatherName", bd."GodmotherName", bd."ExtraFieldsJson" AS "BaptismExtraFields",
+        md."GroomFirstName", md."GroomMiddleName", md."GroomLastName", md."GroomAge", md."BrideFirstName", md."BrideMiddleName", md."BrideLastName", md."BrideAge", md."CenomarNumber", md."Witnesses", md."ExtraFieldsJson" AS "MarriageExtraFields",
+        cd."CandidateFirstName", cd."CandidateMiddleName", cd."CandidateLastName", cd."CandidateDateOfBirth", cd."SponsorName", cd."ParishOfBaptism", cd."ExtraFieldsJson" AS "ConfirmationExtraFields",
+        fd."DeceasedFirstName", fd."DeceasedMiddleName", fd."DeceasedLastName", fd."DateOfDeath", fd."RelationshipToDeceased", fd."PlaceOfWake", fd."ExtraFieldsJson" AS "FuneralExtraFields",
+        hd."FullAddress" AS "HouseBlessingFullAddress", hd."Landmark" AS "HouseBlessingLandmark", hd."PreferredContactPerson" AS "HouseBlessingPreferredContactPerson", hd."ExtraFieldsJson" AS "HouseBlessingExtraFields",
+        COALESCE(sr."ContactFirstName", p."FirstName") AS "FirstName",
+        COALESCE(sr."ContactLastName", p."LastName") AS "LastName",
+        COALESCE(sr."ContactEmail", p."EmailAddress") AS "EmailAddress",
+        COALESCE(sr."ContactMobile", p."MobileNumber") AS "MobileNumber",
+        COALESCE(sr."ContactAddress", p."Address") AS "Address",
+        s."Name" AS "ServiceName"
       FROM "ServiceRequest" sr
-      JOIN "Parishioners" p ON sr.ParishionerId = p.ParishionerId
-      JOIN "Service" s ON sr.ServiceId = s.ServiceId
-      LEFT JOIN "BaptismRequestDetail" bd ON sr.ServiceRequestId = bd.ServiceRequestId
-      LEFT JOIN "MarriageRequestDetail" md ON sr.ServiceRequestId = md.ServiceRequestId
-      LEFT JOIN "ConfirmationRequestDetail" cd ON sr.ServiceRequestId = cd.ServiceRequestId
-      LEFT JOIN "FuneralRequestDetail" fd ON sr.ServiceRequestId = fd.ServiceRequestId
-      LEFT JOIN "HouseBlessingRequestDetail" hd ON sr.ServiceRequestId = hd.ServiceRequestId
-      ORDER BY sr.CreatedAt DESC
+      JOIN "Parishioners" p ON sr."ParishionerId" = p."ParishionerId"
+      JOIN "Service" s ON sr."ServiceId" = s."ServiceId"
+      LEFT JOIN "BaptismRequestDetail" bd ON sr."ServiceRequestId" = bd."ServiceRequestId"
+      LEFT JOIN "MarriageRequestDetail" md ON sr."ServiceRequestId" = md."ServiceRequestId"
+      LEFT JOIN "ConfirmationRequestDetail" cd ON sr."ServiceRequestId" = cd."ServiceRequestId"
+      LEFT JOIN "FuneralRequestDetail" fd ON sr."ServiceRequestId" = fd."ServiceRequestId"
+      LEFT JOIN "HouseBlessingRequestDetail" hd ON sr."ServiceRequestId" = hd."ServiceRequestId"
+      ORDER BY sr."CreatedAt" DESC
     `);
 
     const requests = result.rows.map(row => {
@@ -2335,10 +2338,10 @@ app.delete('/api/admin/service-requests/:requestId', requireAdmin, requireRole([
 });
 
 const sacramentalDefinitions = {
-  baptism: { table: 'BaptismRecords', id: 'BaptismId', date: 'DateOfBaptism', name: "CONCAT(ChildFirstName, ' ', ChildLastName)", priest: 'MinisterName', columns: ['RegistryNumber', 'ChildFirstName', 'ChildMiddleName', 'ChildLastName', 'DateOfBirth', 'PlaceOfBirth', 'DateOfBaptism', 'FatherFullName', 'MotherFullName', 'MinisterName', 'Sponsors', 'Remarks'] },
-  confirmation: { table: 'ConfirmationRecords', id: 'ConfirmationId', date: 'DateOfConfirmation', name: "CONCAT(CandidateFirstName, ' ', CandidateLastName)", priest: 'BishopOrMinister', columns: ['RegistryNumber', 'CandidateFirstName', 'CandidateMiddleName', 'CandidateLastName', 'DateOfBirth', 'DateOfConfirmation', 'FatherFullName', 'MotherFullName', 'SponsorName', 'BishopOrMinister', 'ParishOfBaptism'] },
-  marriage: { table: 'MarriageRecords', id: 'MarriageId', date: 'DateOfMarriage', name: "CONCAT(GroomFirstName, ' ', GroomLastName, ' / ', BrideFirstName, ' ', BrideLastName)", priest: 'SolemnizingPriest', columns: ['RegistryNumber', 'GroomFirstName', 'GroomMiddleName', 'GroomLastName', 'GroomAge', 'GroomParents', 'BrideFirstName', 'BrideMiddleName', 'BrideLastName', 'BrideAge', 'BrideParents', 'DateOfMarriage', 'Witnesses', 'SolemnizingPriest'] },
-  death: { table: 'DeathRecords', id: 'DeathId', date: 'DateOfDeath', name: "CONCAT(DeceasedFirstName, ' ', DeceasedLastName)", priest: 'OfficiatingPriest', columns: ['RegistryNumber', 'DeceasedFirstName', 'DeceasedMiddleName', 'DeceasedLastName', 'Age', 'DateOfDeath', 'DateOfBurial', 'CauseOfDeath', 'PlaceOfBurial', 'SacramentsReceived', 'OfficiatingPriest'] },
+  baptism: { table: 'BaptismRecords', id: '"BaptismId"', date: '"DateOfBaptism"', name: `CONCAT("ChildFirstName", ' ', "ChildLastName")`, priest: '"MinisterName"', columns: ['RegistryNumber', 'ChildFirstName', 'ChildMiddleName', 'ChildLastName', 'DateOfBirth', 'PlaceOfBirth', 'DateOfBaptism', 'FatherFullName', 'MotherFullName', 'MinisterName', 'Sponsors', 'Remarks'] },
+  confirmation: { table: 'ConfirmationRecords', id: '"ConfirmationId"', date: '"DateOfConfirmation"', name: `CONCAT("CandidateFirstName", ' ', "CandidateLastName")`, priest: '"BishopOrMinister"', columns: ['RegistryNumber', 'CandidateFirstName', 'CandidateMiddleName', 'CandidateLastName', 'DateOfBirth', 'DateOfConfirmation', 'FatherFullName', 'MotherFullName', 'SponsorName', 'BishopOrMinister', 'ParishOfBaptism'] },
+  marriage: { table: 'MarriageRecords', id: '"MarriageId"', date: '"DateOfMarriage"', name: `CONCAT("GroomFirstName", ' ', "GroomLastName", ' / ', "BrideFirstName", ' ', "BrideLastName")`, priest: '"SolemnizingPriest"', columns: ['RegistryNumber', 'GroomFirstName', 'GroomMiddleName', 'GroomLastName', 'GroomAge', 'GroomParents', 'BrideFirstName', 'BrideMiddleName', 'BrideLastName', 'BrideAge', 'BrideParents', 'DateOfMarriage', 'Witnesses', 'SolemnizingPriest'] },
+  death: { table: 'DeathRecords', id: '"DeathId"', date: '"DateOfDeath"', name: `CONCAT("DeceasedFirstName", ' ', "DeceasedLastName")`, priest: '"OfficiatingPriest"', columns: ['RegistryNumber', 'DeceasedFirstName', 'DeceasedMiddleName', 'DeceasedLastName', 'Age', 'DateOfDeath', 'DateOfBurial', 'CauseOfDeath', 'PlaceOfBurial', 'SacramentsReceived', 'OfficiatingPriest'] },
 };
 
 const staffName = req => req.staff?.email || req.staff?.role || 'staff';
@@ -2366,10 +2369,10 @@ app.post('/api/admin/operations/schedule', requireAdmin, requireRole(['ParishPri
   if (!title || !date || !time || !location || !priestUsername) return res.status(400).json({ message: 'Schedule title, date, time, location, and minister are required.' });
   try {
     const pool = getPool();
-    const clash = await pool.query(`SELECT MassScheduleId AS id, MassDate AS date, MassTime AS time, Location AS location, PriestUsername AS priestUsername, Status AS status FROM "MassSchedule" WHERE MassDate=$1 AND MassTime=$2`, [date, time]);
+    const clash = await pool.query(`SELECT "MassScheduleId" AS id, "MassDate" AS date, "MassTime" AS time, "Location" AS location, "PriestUsername" AS priestUsername, "Status" AS status FROM "MassSchedule" WHERE "MassDate"=$1 AND "MassTime"=$2`, [date, time]);
     const conflict = findScheduleConflict({ date, time, location, priestUsername }, clash.rows);
     if (conflict.conflict) return res.status(409).json({ message: conflict.message });
-    const result = await pool.query(`INSERT INTO "MassSchedule" (Title, MassDate, MassTime, Location, PriestUsername, Notes, Status) RETURNING "MassScheduleId" AS id VALUES ($1, $2, $3, $4, $5, $6, $7)`, [title, date, time, location, priestUsername, notes || null, status || 'Scheduled']);
+    const result = await pool.query(`INSERT INTO "MassSchedule" ("Title", "MassDate", "MassTime", "Location", "PriestUsername", "Notes", "Status") VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING "MassScheduleId" AS id`, [title, date, time, location, priestUsername, notes || null, status || 'Scheduled']);
     res.status(201).json(result.rows[0]);
   } catch (error) { logError(error, { context: 'createSchedule' }); res.status(500).json({ message: 'Unable to save schedule.' }); }
 });
@@ -2509,7 +2512,7 @@ app.get('/api/admin/operations/finance/audit', requireAdmin, requireRole(['Paris
 });
 
 app.get('/api/admin/operations/finance/reports', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Bookkeeper', 'Staff']), async (_req, res) => {
-  try { const result = await getPool().query('SELECT * FROM "FinanceReportSnapshots" ORDER BY GeneratedAt DESC'); res.json(result.rows); } catch (error) { logError(error, { context: 'financeReportHistory' }); res.status(500).json({ message: 'Unable to load finance report history.' }); }
+  try { const result = await getPool().query('SELECT * FROM "FinanceReportSnapshots" ORDER BY "GeneratedAt" DESC'); res.json(result.rows); } catch (error) { logError(error, { context: 'financeReportHistory' }); res.status(500).json({ message: 'Unable to load finance report history.' }); }
 });
 
 app.get('/api/admin/operations/applications/:id/history', requireAdmin, requireRole(['ParishPriest', 'Secretary', 'Staff']), async (req, res) => {
@@ -2537,9 +2540,9 @@ app.get('/api/admin/operations/statistics', requireAdmin, requireRole(['ParishPr
   try {
     const db = getPool();
     const [summary, monthly, demographics] = await Promise.all([
-      db.query(`SELECT (SELECT COUNT(*) FROM "BaptismRecords" WHERE EXTRACT(year FROM DateOfBaptism)::int=$1) AS totalBaptisms, (SELECT COUNT(*) FROM "ConfirmationRecords" WHERE EXTRACT(year FROM DateOfConfirmation)::int=$1) AS totalConfirmations, (SELECT COUNT(*) FROM "MarriageRecords" WHERE EXTRACT(year FROM DateOfMarriage)::int=$1) AS totalMarriages, (SELECT COUNT(*) FROM "DeathRecords" WHERE EXTRACT(year FROM DateOfDeath)::int=$1) AS totalDeaths`, [year]),
-      db.query(`SELECT m.month, TO_CHAR(MAKE_DATE(($1)::int, (m.month)::int, 1)) AS monthName, (SELECT COUNT(*) FROM "BaptismRecords" WHERE EXTRACT(year FROM DateOfBaptism)::int=$1 AND EXTRACT(month FROM DateOfBaptism)::int=m.month) AS baptisms, (SELECT COUNT(*) FROM "ConfirmationRecords" WHERE EXTRACT(year FROM DateOfConfirmation)::int=$1 AND EXTRACT(month FROM DateOfConfirmation)::int=m.month) AS confirmations, (SELECT COUNT(*) FROM "MarriageRecords" WHERE EXTRACT(year FROM DateOfMarriage)::int=$1 AND EXTRACT(month FROM DateOfMarriage)::int=m.month) AS marriages, (SELECT COUNT(*) FROM "DeathRecords" WHERE EXTRACT(year FROM DateOfDeath)::int=$1 AND EXTRACT(month FROM DateOfDeath)::int=m.month) AS deaths FROM (VALUES (1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11),(12)) m(month) ORDER BY m.month`, [year]),
-      db.query(`SELECT (SELECT COUNT(*) FROM "BaptismRecords" WHERE EXTRACT(year FROM DateOfBaptism)::int=$1 AND EXTRACT(year FROM age(DateOfBaptism, DateOfBirth))::int=0) AS InfantsUnder1Yr, (SELECT COUNT(*) FROM "BaptismRecords" WHERE EXTRACT(year FROM DateOfBaptism)::int=$1 AND EXTRACT(year FROM age(DateOfBaptism, DateOfBirth))::int>0) AS ChildrenOver1Yr, (SELECT AVG(CAST(GroomAge AS decimal(10,2))) FROM "MarriageRecords" WHERE EXTRACT(year FROM DateOfMarriage)::int=$1) AS AvgGroomAge, (SELECT AVG(CAST(BrideAge AS decimal(10,2))) FROM "MarriageRecords" WHERE EXTRACT(year FROM DateOfMarriage)::int=$1) AS AvgBrideAge, (SELECT COUNT(*) FROM "MarriageRecords" WHERE EXTRACT(year FROM DateOfMarriage)::int=$1 AND GroomAge < 25 AND BrideAge < 25) AS Under25, (SELECT COUNT(*) FROM "MarriageRecords" WHERE EXTRACT(year FROM DateOfMarriage)::int=$1 AND ((GroomAge BETWEEN 25 AND 35) OR (BrideAge BETWEEN 25 AND 35))) AS Age25To35, (SELECT COUNT(*) FROM "MarriageRecords" WHERE EXTRACT(year FROM DateOfMarriage)::int=$1 AND (GroomAge > 35 OR BrideAge > 35)) AS Over35, (SELECT AVG(CAST(Age AS decimal(10,2))) FROM "DeathRecords" WHERE EXTRACT(year FROM DateOfDeath)::int=$1) AS AvgDeceasedAge, (SELECT COUNT(*) FROM "DeathRecords" WHERE EXTRACT(year FROM DateOfDeath)::int=$1 AND Age < 18) AS Under18, (SELECT COUNT(*) FROM "DeathRecords" WHERE EXTRACT(year FROM DateOfDeath)::int=$1 AND Age BETWEEN 18 AND 59) AS Age18To59, (SELECT COUNT(*) FROM "DeathRecords" WHERE EXTRACT(year FROM DateOfDeath)::int=$1 AND Age >= 60) AS Senior60Plus`, [year]),
+      db.query(`SELECT (SELECT COUNT(*) FROM "BaptismRecords" WHERE EXTRACT(year FROM "DateOfBaptism")::int=$1) AS "totalBaptisms", (SELECT COUNT(*) FROM "ConfirmationRecords" WHERE EXTRACT(year FROM "DateOfConfirmation")::int=$1) AS "totalConfirmations", (SELECT COUNT(*) FROM "MarriageRecords" WHERE EXTRACT(year FROM "DateOfMarriage")::int=$1) AS "totalMarriages", (SELECT COUNT(*) FROM "DeathRecords" WHERE EXTRACT(year FROM "DateOfDeath")::int=$1) AS "totalDeaths"`, [year]),
+      db.query(`SELECT m.month, TO_CHAR(MAKE_DATE(($1)::int, (m.month)::int, 1), 'FMMonth') AS "monthName", (SELECT COUNT(*) FROM "BaptismRecords" WHERE EXTRACT(year FROM "DateOfBaptism")::int=$1 AND EXTRACT(month FROM "DateOfBaptism")::int=m.month) AS baptisms, (SELECT COUNT(*) FROM "ConfirmationRecords" WHERE EXTRACT(year FROM "DateOfConfirmation")::int=$1 AND EXTRACT(month FROM "DateOfConfirmation")::int=m.month) AS confirmations, (SELECT COUNT(*) FROM "MarriageRecords" WHERE EXTRACT(year FROM "DateOfMarriage")::int=$1 AND EXTRACT(month FROM "DateOfMarriage")::int=m.month) AS marriages, (SELECT COUNT(*) FROM "DeathRecords" WHERE EXTRACT(year FROM "DateOfDeath")::int=$1 AND EXTRACT(month FROM "DateOfDeath")::int=m.month) AS deaths FROM (VALUES (1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11),(12)) m(month) ORDER BY m.month`, [year]),
+      db.query(`SELECT (SELECT COUNT(*) FROM "BaptismRecords" WHERE EXTRACT(year FROM "DateOfBaptism")::int=$1 AND EXTRACT(year FROM age("DateOfBaptism", "DateOfBirth"))::int=0) AS "InfantsUnder1Yr", (SELECT COUNT(*) FROM "BaptismRecords" WHERE EXTRACT(year FROM "DateOfBaptism")::int=$1 AND EXTRACT(year FROM age("DateOfBaptism", "DateOfBirth"))::int>0) AS "ChildrenOver1Yr", (SELECT AVG(CAST("GroomAge" AS decimal(10,2))) FROM "MarriageRecords" WHERE EXTRACT(year FROM "DateOfMarriage")::int=$1) AS "AvgGroomAge", (SELECT AVG(CAST("BrideAge" AS decimal(10,2))) FROM "MarriageRecords" WHERE EXTRACT(year FROM "DateOfMarriage")::int=$1) AS "AvgBrideAge", (SELECT COUNT(*) FROM "MarriageRecords" WHERE EXTRACT(year FROM "DateOfMarriage")::int=$1 AND "GroomAge" < 25 AND "BrideAge" < 25) AS "Under25", (SELECT COUNT(*) FROM "MarriageRecords" WHERE EXTRACT(year FROM "DateOfMarriage")::int=$1 AND (("GroomAge" BETWEEN 25 AND 35) OR ("BrideAge" BETWEEN 25 AND 35))) AS "Age25To35", (SELECT COUNT(*) FROM "MarriageRecords" WHERE EXTRACT(year FROM "DateOfMarriage")::int=$1 AND ("GroomAge" > 35 OR "BrideAge" > 35)) AS "Over35", (SELECT AVG(CAST("Age" AS decimal(10,2))) FROM "DeathRecords" WHERE EXTRACT(year FROM "DateOfDeath")::int=$1) AS "AvgDeceasedAge", (SELECT COUNT(*) FROM "DeathRecords" WHERE EXTRACT(year FROM "DateOfDeath")::int=$1 AND "Age" < 18) AS "Under18", (SELECT COUNT(*) FROM "DeathRecords" WHERE EXTRACT(year FROM "DateOfDeath")::int=$1 AND "Age" BETWEEN 18 AND 59) AS "Age18To59", (SELECT COUNT(*) FROM "DeathRecords" WHERE EXTRACT(year FROM "DateOfDeath")::int=$1 AND "Age" >= 60) AS "Senior60Plus"`, [year]),
     ]);
     const row = summary.rows[0] || {};
     const demographicRow = demographics.rows[0] || {};
@@ -2680,7 +2683,7 @@ app.post('/api/admin/sacramental/upload-archive', requireAdmin, requireRole(['Pa
   if (!req.file) return res.status(400).json({ message: 'A scanned document is required.' });
   res.status(201).json({ fileUrl: `/uploads/${req.file.filename}` });
 });
-app.post('/api/admin/sacramental/archives', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => { const { sacramentType, bookNumber, pageNumber, fileUrl, notes } = req.body || {}; try { const result = await getPool().query('INSERT INTO "SacramentalArchives" (SacramentType, BookNumber, PageNumber, FileUrl, Notes, UploadedBy) RETURNING "ArchiveId" VALUES ($1,$2,$3,$4,$5,$6)', [sacramentType, Number(bookNumber), Number(pageNumber), fileUrl, notes || null, staffName(req)]); res.status(201).json(result.rows[0]); } catch (error) { logError(error, { context: 'createSacramentalArchive' }); res.status(500).json({ message: 'Unable to save archive entry.' }); } });
+app.post('/api/admin/sacramental/archives', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => { const { sacramentType, bookNumber, pageNumber, fileUrl, notes } = req.body || {}; try { const result = await getPool().query('INSERT INTO "SacramentalArchives" ("SacramentType", "BookNumber", "PageNumber", "FileUrl", "Notes", "UploadedBy") VALUES ($1,$2,$3,$4,$5,$6) RETURNING "ArchiveId"', [sacramentType, Number(bookNumber), Number(pageNumber), fileUrl, notes || null, staffName(req)]); res.status(201).json(result.rows[0]); } catch (error) { logError(error, { context: 'createSacramentalArchive' }); res.status(500).json({ message: 'Unable to save archive entry.' }); } });
 app.put('/api/admin/sacramental/archives/:id', requireAdmin, requireRole(['ParishPriest', 'Secretary']), async (req, res) => {
   const id = Number(req.params.id); const { bookNumber, pageNumber, notes } = req.body || {};
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid archive ID.' });
@@ -2695,7 +2698,7 @@ app.delete('/api/admin/sacramental/archives/:id', requireAdmin, requireRole(['Pa
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid archive ID.' });
   try {
-    const result = await getPool().query('DELETE FROM "SacramentalArchives" OUTPUT DELETED.FileUrl WHERE ArchiveId=$1', [id]);
+    const result = await getPool().query('DELETE FROM "SacramentalArchives" WHERE "ArchiveId"=$1 RETURNING "FileUrl"', [id]);
     const fileUrl = result.rows[0]?.FileUrl;
     if (String(fileUrl).startsWith('/uploads/')) {
       fs.promises.unlink(path.join(uploadDirectory, path.basename(String(fileUrl)))).catch(() => {});
@@ -2986,7 +2989,7 @@ app.delete('/api/admin/blocked-slots/:id', requireAdmin, requireRole(['ParishPri
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isInteger(id)) return res.status(400).json({ message: 'Invalid request.' });
   try {
-    await getPool().query('DELETE FROM "BlockedSlots" WHERE BlockedSlotId=$1', [id]);
+    await getPool().query('DELETE FROM "BlockedSlots" WHERE "BlockedSlotId"=$1', [id]);
     res.json({ success: true });
   } catch (error) {
     logError(error, { context: 'deleteBlockedSlot' });
@@ -2999,19 +3002,19 @@ app.get('/api/admin/certificate-requests', requireAdmin, requireRole(['ParishPri
     // Include guest requests (AccountId is NULL) by preferring the stored contact fields,
     // falling back to the linked parishioner profile for account-based requests.
     const result = await getPool().query(`
-      SELECT cr.CertificateRequestId, cr.CertificateType, cr.PreferredDate, cr.PreferredTime, cr.Status, cr.Notes,
-        COALESCE(cr.FirstName, p.FirstName, '') AS FirstName,
-        COALESCE(cr.LastName, p.LastName, '') AS LastName,
-        COALESCE(cr.ContactEmail, p.EmailAddress, '') AS EmailAddress,
-        cr.ReferenceCode,
-        COUNT(crd.CertificateRequestDocumentId) AS DocumentCount
+      SELECT cr."CertificateRequestId", cr."CertificateType", cr."PreferredDate", cr."PreferredTime", cr."Status", cr."Notes",
+        COALESCE(cr."FirstName", p."FirstName", '') AS "FirstName",
+        COALESCE(cr."LastName", p."LastName", '') AS "LastName",
+        COALESCE(cr."ContactEmail", p."EmailAddress", '') AS "EmailAddress",
+        cr."ReferenceCode",
+        COUNT(crd."CertificateRequestDocumentId") AS "DocumentCount"
       FROM "CertificateRequests" cr
       LEFT JOIN "ParishionerAccounts" a ON a."AccountId" = cr."AccountId"
       LEFT JOIN "Parishioners" p ON p."ParishionerId" = a."ParishionerId"
-      LEFT JOIN "CertificateRequestDocuments" crd ON crd.CertificateRequestId = cr.CertificateRequestId
-      GROUP BY cr.CertificateRequestId, cr.CertificateType, cr.PreferredDate, cr.PreferredTime, cr.Status, cr.Notes,
-        cr.FirstName, cr.LastName, cr.ContactEmail, cr.ReferenceCode, p.FirstName, p.LastName, p.EmailAddress, cr.CreatedAt
-      ORDER BY cr.CreatedAt DESC
+      LEFT JOIN "CertificateRequestDocuments" crd ON crd."CertificateRequestId" = cr."CertificateRequestId"
+      GROUP BY cr."CertificateRequestId", cr."CertificateType", cr."PreferredDate", cr."PreferredTime", cr."Status", cr."Notes",
+        cr."FirstName", cr."LastName", cr."ContactEmail", cr."ReferenceCode", p."FirstName", p."LastName", p."EmailAddress", cr."CreatedAt"
+      ORDER BY cr."CreatedAt" DESC
     `);
     res.json(result.rows);
   } catch (error) {
@@ -3027,10 +3030,10 @@ app.get('/api/admin/certificate-requests/:requestId/documents', requireAdmin, re
   }
   try {
     const result = await getPool().query(`
-      SELECT CertificateRequestDocumentId, CertificateRequestId, OriginalFileName, StoredFileName, FileUrl, MimeType, FileSizeBytes, UploadedAt
+      SELECT "CertificateRequestDocumentId", "CertificateRequestId", "OriginalFileName", "StoredFileName", "FileUrl", "MimeType", "FileSizeBytes", "UploadedAt"
       FROM "CertificateRequestDocuments"
-      WHERE CertificateRequestId = $1
-      ORDER BY UploadedAt DESC
+      WHERE "CertificateRequestId" = $1
+      ORDER BY "UploadedAt" DESC
     `, [requestId]);
     res.json(result.rows.map(document => ({
       ...document,
@@ -3049,7 +3052,7 @@ app.get('/api/admin/certificate-requests/:requestId/documents/:documentId/file',
     return res.status(400).json({ message: 'Invalid certificate document ID.' });
   }
   try {
-    const result = await getPool().query('SELECT FileUrl, OriginalFileName, MimeType FROM "CertificateRequestDocuments" WHERE CertificateRequestId=$1 AND CertificateRequestDocumentId=$2', [requestId, documentId]);
+    const result = await getPool().query('SELECT "FileUrl", "OriginalFileName", "MimeType" FROM "CertificateRequestDocuments" WHERE "CertificateRequestId"=$1 AND "CertificateRequestDocumentId"=$2', [requestId, documentId]);
     const document = result.rows[0];
     if (!document?.FileUrl || !String(document.FileUrl).startsWith('/uploads/')) {
       return res.status(404).json({ message: 'Certificate document not found.' });
@@ -3072,13 +3075,14 @@ app.put('/api/admin/certificate-requests/:requestId', requireAdmin, requireRole(
     if (!Number.isInteger(requestId) || requestId <= 0) return res.status(400).json({ message: 'Invalid certificate request ID.' });
     if (req.body.status === 'Confirmed') {
       const conflict = await getPool().query(`
-        SELECT TOP 1 CertificateRequestId
+        SELECT "CertificateRequestId"
         FROM "CertificateRequests"
-        WHERE CertificateRequestId=$1
-          AND Status IN ('Confirmed', 'ReadyForClaim', 'Claimed')
+        WHERE "CertificateRequestId"=$1
+          AND "Status" IN ('Confirmed', 'ReadyForClaim', 'Claimed')
+        LIMIT 1
       `, [requestId]);
       if (!conflict.rows[0]) {
-        const requested = await getPool().query('SELECT PreferredDate, PreferredTime FROM "CertificateRequests" WHERE CertificateRequestId=$1', [requestId]);
+        const requested = await getPool().query('SELECT "PreferredDate", "PreferredTime" FROM "CertificateRequests" WHERE "CertificateRequestId"=$1', [requestId]);
         const appointment = requested.rows[0];
         if (!appointment) return res.status(404).json({ message: 'Certificate request not found.' });
         const clash = await getPool().query(`SELECT "CertificateRequestId" FROM "CertificateRequests" WHERE "CertificateRequestId"<>$1 AND "PreferredDate"=$2 AND "PreferredTime"=$3 AND "Status" IN ('Confirmed','ReadyForClaim','Claimed')`, [requestId, appointment.PreferredDate, appointment.PreferredTime]);

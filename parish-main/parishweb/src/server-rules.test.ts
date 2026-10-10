@@ -42,6 +42,46 @@ describe('PostgreSQL scheduled queries', () => {
   });
 });
 
+describe('PostgreSQL API query compatibility', () => {
+  const server = readFileSync('server.js', 'utf8');
+
+  it('uses PostgreSQL syntax for slot lookup and archive deletion', () => {
+    expect(server).toContain('SELECT "ServiceRequestId" FROM "ServiceRequest"');
+    expect(server).toContain('LIMIT 1');
+    expect(server).toContain('DELETE FROM "SacramentalArchives" WHERE "ArchiveId"=$1 RETURNING "FileUrl"');
+    expect(server).toContain('VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING "MassScheduleId" AS id');
+    expect(server).toContain('VALUES ($1,$2,$3,$4,$5,$6) RETURNING "ArchiveId"');
+    expect(server).not.toContain('SELECT TOP 1');
+    expect(server).not.toContain('OUTPUT DELETED');
+  });
+
+  it('quotes contact-message columns and writes PostgreSQL booleans', () => {
+    expect(server).toContain('SELECT "ContactMessageId", "Name", "Email", "Phone", "Message", "IsRead", "CreatedAt"');
+    expect(server).toContain('ORDER BY "CreatedAt" DESC');
+    expect(server).toContain('WHERE "ContactMessageId" = $1');
+    expect(server).toContain('[id, req.body.isRead]');
+  });
+
+  it('uses a boolean permission parameter and binds the audit query limit', () => {
+    expect(server).toContain('CASE WHEN $1 THEN u."EmailAddress" ELSE NULL END');
+    expect(server).toContain('ORDER BY "ChangedAt" DESC LIMIT $1\', [limit]');
+  });
+
+  it('quotes sacramental and certificate query identifiers', () => {
+    expect(server).toContain('CONCAT("ChildFirstName", \' \', "ChildLastName")');
+    expect(server).toContain('EXTRACT(year FROM "DateOfBaptism")');
+    expect(server).toContain('TO_CHAR(MAKE_DATE(($1)::int, (m.month)::int, 1), \'FMMonth\')');
+    expect(server).toContain('SELECT cr."CertificateRequestId", cr."CertificateType"');
+  });
+
+  it('quotes service-request identifiers and preserves response field names', () => {
+    expect(server).toContain('sr."ServiceRequestId"');
+    expect(server).toContain('bd."ChildFirstName"');
+    expect(server).toContain('AS "BaptismExtraFields"');
+    expect(server).toContain('s."Name" AS "ServiceName"');
+  });
+});
+
 describe('servicePolicy', () => {
   it('blocks Confirmation outside February', () => {
     const result = servicePolicy('Confirmation', '2026-03-10', new Date('2025-12-15T00:00:00'));

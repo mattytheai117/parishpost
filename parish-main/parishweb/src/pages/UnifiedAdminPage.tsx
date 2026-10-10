@@ -68,7 +68,6 @@ export function UnifiedAdminPage() {
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 760px)')
     const handler = (e: MediaQueryListEvent) => { if (e.matches) setSidebarCollapsed(false) }
-    if (mq.matches) setSidebarCollapsed(false)
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)
   }, [])

@@ -4,15 +4,15 @@
 
 Copy `.env.example` to `.env` for local configuration and replace every placeholder with the correct deployment value. Never commit `.env` or put real secrets in `.env.example`.
 
-The server requires `ADMIN_TOKEN` when `NODE_ENV=production`. Set `FRONTEND_URL` to the deployed frontend origin and `PORT` to the port provided by the hosting platform. `TRUST_PROXY_HOPS` defaults to `0`; set it to the exact number of trusted reverse-proxy hops in front of the server so rate limiting uses the client IP. Do not enable proxy trust for untrusted hops.
+The server requires `ADMIN_TOKEN` when `NODE_ENV=production`. Set `FRONTEND_URL` to the deployed Vercel frontend origin and `PORT` to the port provided by Render. Set `VITE_API_URL` to the Render API origin when building the frontend. Keep `DATABASE_URL` on the Render server only; it must never be exposed as a `VITE_` variable.
 
-Database TLS certificate validation is enabled by default in production. Set `DB_TRUST_SERVER_CERTIFICATE=true` only for a trusted development database with a self-signed certificate. Set `VITE_API_URL` to the API origin when building the frontend.
+Database TLS certificate validation is enabled by default. Set `DB_TRUST_SERVER_CERTIFICATE=true` only for a trusted development database with a self-signed certificate. `TRUST_PROXY_HOPS` defaults to `0`; set it to the exact number of trusted reverse-proxy hops in front of Render so rate limiting uses the client IP. Do not enable proxy trust for untrusted hops.
 
 The API rate limit is 300 requests per IP per 15 minutes; registration and login endpoints allow 10 attempts per IP per 15 minutes. Configure trusted proxy hops correctly when deployed behind a reverse proxy.
 
 ## Database migration order
 
-Use the SQL scripts in the `migrations` folder in this order against the correct parish database:
+Supabase uses PostgreSQL. Apply the numbered scripts in `migrations-pg` in order to the Supabase project (for example, through the Supabase SQL Editor). The similarly numbered scripts in `migrations` are for the retired SQL Server database and must not be run against Supabase:
 
 1. `001_staff_mass_schedule.sql`
 2. `002_sacramental_records.sql`
@@ -35,19 +35,22 @@ Use the SQL scripts in the `migrations` folder in this order against the correct
 19. `019_admin_usernames.sql`
 20. `020_site_content.sql`
 21. `021_contact_messages.sql`
+22. `022_user_module_permissions.sql`
+23. `023_event_tagalog_content.sql`
+24. `024_blocked_slots.sql`
+25. `025_prayer_requests.sql`
 
-Important: these scripts are intended for schema setup and upgrades. Do not blindly rerun them on a populated database unless you know the previous migration state. The guest certificate migration is intentionally idempotent so it can be rerun safely on a partially applied schema.
-The admin username migration backfills existing staff usernames from their current email addresses. Run it before using the updated staff account management endpoints.
+These scripts are intended for schema setup and upgrades. Do not blindly rerun them on a populated database unless you know the previous migration state. The guest certificate migration is intentionally idempotent so it can be rerun safely on a partially applied schema. The admin username migration backfills existing staff usernames from their current email addresses; run it before using the updated staff account management endpoints.
 
 ## Staff roles
 
-Run `migrations/001_staff_mass_schedule.sql` against ParishDB before using the Mass Schedule tab.
-Run `migrations/004_administrative_operations.sql` after the other migrations before using the administrative operations workspace at `/admin/operations`.
-Run `migrations/006_parishioner_portal_certificates.sql` to enable parishioner accounts, request tracking, and certificate claiming appointments at `/portal`.
-Run `migrations/007_sacramental_audit.sql` to enable sacramental record change history in the digital ledger.
-Run `migrations/008_finance_controls.sql` to enable expense entries, draft/approval/reconciliation states, and finance audit history.
-Run `migrations/020_site_content.sql` to enable the About Us and photo gallery editors in the admin workspace.
-Run `migrations/021_contact_messages.sql` to enable the Contact page message inbox in the admin workspace (the Contact page content editor uses `020_site_content.sql`).
+Apply `migrations-pg/001_staff_mass_schedule.sql` before using the Mass Schedule tab.
+Apply `migrations-pg/004_administrative_operations.sql` before using the administrative operations workspace at `/admin/operations`.
+Apply `migrations-pg/006_parishioner_portal_certificates.sql` to enable parishioner accounts, request tracking, and certificate claiming appointments at `/portal`.
+Apply `migrations-pg/007_sacramental_audit.sql` to enable sacramental record change history in the digital ledger.
+Apply `migrations-pg/008_finance_controls.sql` to enable expense entries, draft/approval/reconciliation states, and finance audit history.
+Apply `migrations-pg/020_site_content.sql` to enable the About Us and photo gallery editors in the admin workspace.
+Apply `migrations-pg/021_contact_messages.sql` to enable the Contact page message inbox in the admin workspace (the Contact page content editor uses `020_site_content.sql`).
 
 Configure staff logins with environment variables:
 
@@ -70,7 +73,7 @@ npm run admin:reset-password
 
 In PowerShell, use `npm.cmd run admin:reset-password` if script execution policy blocks `npm.ps1`.
 
-The utility loads the existing database settings from `.env`, asks for the email of an existing account with the `Admin` role, and prompts for the replacement password without displaying it. It updates only that account's password hash and writes a `ResetPassword` entry to `UserManagementAudit` in the same transaction. It does not create a second login or print/store the password. Back up the database first. The user-management audit migration (`migrations/005_user_management_audit.sql`) must already be applied; otherwise the reset is rolled back.
+The utility loads the existing Supabase `DATABASE_URL` from `.env`, asks for the email of an existing account with the `Admin` role, and prompts for the replacement password without displaying it. It updates only that account's password hash and writes a `ResetPassword` entry to `UserManagementAudit` in the same transaction. It does not create a second login or print/store the password. Back up the database first. The user-management audit migration (`migrations-pg/005_user_management_audit.sql`) must already be applied; otherwise the reset is rolled back.
 
 Treasurers are restricted to the future finance workspace. Secretaries manage events and service requests. Priests can view pastoral requests and see upcoming Masses assigned to their username.
 

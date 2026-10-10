@@ -10,20 +10,30 @@ export function AdminContactMessagesPage({ canDelete }: { canDelete: boolean }) 
   const [error, setError] = useState('')
   const [filter, setFilter] = useState<'all' | 'unread'>('all')
   const adminToken = () => window.localStorage.getItem('adminToken') || ''
+  const requestMessages = useCallback(() => (
+    apiClient.contactMessages.list(window.localStorage.getItem('adminToken') || '')
+  ), [])
 
   const load = useCallback(async () => {
-    setLoading(true)
-    setError('')
     try {
-      setMessages(await apiClient.contactMessages.list(adminToken()))
+      setMessages(await requestMessages())
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load messages.')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [requestMessages])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    let active = true
+    requestMessages()
+      .then(result => { if (active) setMessages(result) })
+      .catch(loadError => {
+        if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load messages.')
+      })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [requestMessages])
 
   const toggleRead = async (message: ContactMessage) => {
     try {
@@ -67,7 +77,7 @@ export function AdminContactMessagesPage({ canDelete }: { canDelete: boolean }) 
             Unread <span>{unreadCount}</span>
           </button>
         </div>
-        <button type="button" className="btn btn-outline-dark contact-messages-refresh" disabled={loading} onClick={() => void load()}>
+        <button type="button" className="btn btn-outline-dark contact-messages-refresh" disabled={loading} onClick={() => { setLoading(true); setError(''); void load() }}>
           {loading ? 'Loading…' : 'Refresh'}
         </button>
       </div>

@@ -3,42 +3,12 @@ import { StringDecoder } from 'node:string_decoder';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import dotenv from 'dotenv';
-import sql from 'mssql';
+import pg from 'pg';
 import { hashAspNetPassword } from '../password-hash.js';
 
 dotenv.config();
 
-const dbAuth = (process.env.DB_AUTH || '').toLowerCase();
-const baseConfig = {
-  server: process.env.DB_SERVER || 'localhost',
-  database: process.env.DB_NAME || 'ParishDB',
-  options: {
-    encrypt: true,
-    trustServerCertificate: true,
-  },
-  port: Number(process.env.DB_PORT || 1433),
-};
-
-let config = { ...baseConfig };
-if (dbAuth === 'sql') {
-  config = {
-    ...baseConfig,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-  };
-} else if (dbAuth === 'ntlm') {
-  config = {
-    ...baseConfig,
-    authentication: {
-      type: 'ntlm',
-      options: {
-        domain: process.env.DB_DOMAIN || '',
-        userName: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-      },
-    },
-  };
-}
+const { Pool } = pg;
 
 async function ask(prompt) {
   const readline = createInterface({ input: process.stdin, output: process.stdout });
@@ -95,6 +65,11 @@ function askHidden(prompt) {
 }
 
 async function resetAdminPassword() {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error('DATABASE_URL must point to the Supabase PostgreSQL database.');
+  }
+
   const email = (await ask('Admin account email: ')).trim().toLowerCase();
   if (email.length > 255 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error('Enter a valid account email.');
@@ -118,64 +93,69 @@ async function resetAdminPassword() {
   }
 
   const expectedConfirmation = `RESET ${email}`;
-  const typedConfirmation = await ask(`This changes only ${email} in ${baseConfig.database}. Type "${expectedConfirmation}" to continue: `);
+  const typedConfirmation = await ask(`This changes only ${email} in the configured Supabase database. Type "${expectedConfirmation}" to continue: `);
   if (typedConfirmation !== expectedConfirmation) {
     throw new Error('Confirmation did not match; no password was changed.');
   }
 
-  const pool = new sql.ConnectionPool(config);
+  const pool = new Pool({
+    connectionString,
+    ssl: { rejectUnauthorized: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'true' },
+  });
+  let client;
+  let transactionStarted = false;
   try {
-    await pool.connect();
-    const transaction = new sql.Transaction(pool);
-    await transaction.begin();
+    client = await pool.connect();
+    await client.query('BEGIN');
+    transactionStarted = true;
+
     try {
-      const accountResult = await new sql.Request(transaction)
-        .input('email', sql.NVarChar(510), email)
-        .query(`
-          SELECT TOP (2) u.UserId, u.EmailAddress
-          FROM dbo.AspNetUsers u WITH (UPDLOCK, HOLDLOCK)
-          WHERE LOWER(u.EmailAddress) = @email
+      const accountResult = await client.query(`
+          SELECT u."UserId", u."EmailAddress"
+          FROM "AspNetUsers" u
+          WHERE LOWER(u."EmailAddress") = $1
             AND EXISTS (
               SELECT 1
-              FROM dbo.AspNetUserRoles ur
-              INNER JOIN dbo.AspNetRoles r ON r.RoleId = ur.RoleId
-              WHERE ur.UserId = u.UserId AND r.Name = 'Admin'
+              FROM "AspNetUserRoles" ur
+              INNER JOIN "AspNetRoles" r ON r."RoleId" = ur."RoleId"
+              WHERE ur."UserId" = u."UserId" AND r."Name" = 'Admin'
             )
-        `);
+          LIMIT 2
+          FOR UPDATE OF u
+        `, [email]);
 
-      if (accountResult.recordset.length !== 1) {
+      if (accountResult.rows.length !== 1) {
         throw new Error('Exactly one existing Admin account must match that email. No password was changed.');
       }
 
-      const account = accountResult.recordset[0];
-      const updateResult = await new sql.Request(transaction)
-        .input('userId', sql.Int, account.UserId)
-        .input('passwordHash', sql.NVarChar(1024), hashAspNetPassword(password))
-        .query('UPDATE dbo.AspNetUsers SET PasswordHash = @passwordHash WHERE UserId = @userId');
+      const account = accountResult.rows[0];
+      const updateResult = await client.query(
+        'UPDATE "AspNetUsers" SET "PasswordHash" = $1 WHERE "UserId" = $2 RETURNING "UserId"',
+        [hashAspNetPassword(password), account.UserId],
+      );
 
-      if (updateResult.rowsAffected[0] !== 1) {
+      if (updateResult.rowCount !== 1) {
         throw new Error('The account was not updated exactly once. No password was changed.');
       }
 
-      await new sql.Request(transaction)
-        .input('action', sql.VarChar(40), 'ResetPassword')
-        .input('userId', sql.Int, account.UserId)
-        .input('targetName', sql.NVarChar(512), account.EmailAddress)
-        .input('operator', sql.NVarChar(512), operator)
-        .input('details', sql.NVarChar(sql.MAX), JSON.stringify({ method: 'local-admin-password-reset' }))
-        .query(`
-          INSERT INTO dbo.UserManagementAudit (ActionName, TargetUserId, TargetUserName, ChangedBy, Details)
-          VALUES (@action, @userId, @targetName, @operator, @details)
-        `);
+      await client.query(`
+          INSERT INTO "UserManagementAudit" ("ActionName", "TargetUserId", "TargetUserName", "ChangedBy", "Details")
+          VALUES ($1, $2, $3, $4, $5)
+        `, ['ResetPassword', account.UserId, account.EmailAddress, operator, JSON.stringify({ method: 'local-admin-password-reset' })]);
 
-      await transaction.commit();
+      await client.query('COMMIT');
+      transactionStarted = false;
       console.log(`Password reset completed for ${account.EmailAddress}. The change was recorded in UserManagementAudit.`);
     } catch (error) {
-      await transaction.rollback();
+      if (transactionStarted) {
+        await client.query('ROLLBACK');
+        transactionStarted = false;
+      }
       throw error;
     }
   } finally {
-    await pool.close();
+    client?.release();
+    await pool.end();
   }
 }
 

@@ -105,12 +105,15 @@ describe('SiteContentEditorPage', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: 'New album title' }), {
       target: { value: 'Parish Feast' },
     })
-    fireEvent.change(screen.getByLabelText('New album photo'), {
+    const coverUpload = screen.getByLabelText('Choose cover photo for new album').querySelector('input[type="file"]')
+    if (!coverUpload) throw new Error('New album photo input was not rendered.')
+    fireEvent.change(coverUpload, {
       target: { files: [new File(['photo'], 'feast.jpg', { type: 'image/jpeg' })] },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Create album' }))
 
-    expect(await screen.findByRole('img', { name: 'Parish Feast cover' })).toBeTruthy()
+    fireEvent.click(await screen.findByRole('button', { name: /Parish Feast/ }))
+    expect(await screen.findByRole('img', { name: 'Parish Feast photo 1' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Save and publish' }))
 
     expect(mockSave).toHaveBeenCalledWith('gallery', expect.objectContaining({
@@ -131,19 +134,21 @@ describe('SiteContentEditorPage', () => {
     })
     render(<SiteContentEditorPage page="gallery" />)
 
-    fireEvent.change(await screen.findByLabelText('Add photo to Faith'), {
+    fireEvent.click(await screen.findByRole('button', { name: /Faith/ }))
+    const photoUpload = (await screen.findByLabelText('Add a photo to Faith')).querySelector('input[type="file"]')
+    if (!photoUpload) throw new Error('Album photo input was not rendered.')
+    fireEvent.change(photoUpload, {
       target: { files: [new File(['photo'], 'second.jpg', { type: 'image/jpeg' })] },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Upload photo to Faith' }))
+    fireEvent.click(screen.getByText('Upload', { selector: 'button' }))
 
     expect(await screen.findByRole('img', { name: 'Faith photo 2' })).toBeTruthy()
-    expect((screen.getByLabelText('Cover photo for Faith') as HTMLSelectElement).value).toBe('/assets/faith.jpg')
     fireEvent.click(screen.getByRole('button', { name: 'Save and publish' }))
     await screen.findByText('Changes saved and published.')
     expect(mockSave).toHaveBeenLastCalledWith('gallery', expect.objectContaining({
       items: [expect.objectContaining({
         image: '/assets/faith.jpg',
-        photos: ['/assets/faith.jpg', '/uploads/new-photo.jpg'],
+        photos: ['/assets/faith.jpg', { url: '/uploads/new-photo.jpg' }],
       })],
     }), expect.any(String))
   })
@@ -162,14 +167,13 @@ describe('SiteContentEditorPage', () => {
     })
     render(<SiteContentEditorPage page="gallery" />)
 
+    fireEvent.click(await screen.findByRole('button', { name: /Faith/ }))
     fireEvent.change(await screen.findByRole('textbox', { name: 'Album title' }), {
       target: { value: 'Parish Life' },
     })
-    fireEvent.change(screen.getByLabelText('Cover photo for Parish Life'), {
-      target: { value: '/uploads/second.jpg' },
-    })
+    fireEvent.click(screen.getByRole('button', { name: 'Set photo 2 as album cover' }))
 
-    expect(screen.getByRole('img', { name: 'Parish Life cover' }).getAttribute('src')).toContain('/uploads/second.jpg')
+    expect(screen.getByRole('img', { name: 'Parish Life photo 2' }).getAttribute('src')).toContain('/uploads/second.jpg')
     fireEvent.click(screen.getByRole('button', { name: 'Save and publish' }))
     await screen.findByText('Changes saved and published.')
     expect(mockSave).toHaveBeenLastCalledWith('gallery', expect.objectContaining({
@@ -178,10 +182,8 @@ describe('SiteContentEditorPage', () => {
         image: '/uploads/second.jpg',
       })],
     }), expect.any(String))
-
     fireEvent.click(screen.getByRole('button', { name: 'Remove photo 2 from Parish Life' }))
 
-    expect((screen.getByLabelText('Cover photo for Parish Life') as HTMLSelectElement).value).toBe('/assets/faith.jpg')
     expect(screen.getByRole('img', { name: 'Parish Life photo 2' }).getAttribute('src')).toContain('/assets/third.jpg')
     fireEvent.click(screen.getByRole('button', { name: 'Remove photo 2 from Parish Life' }))
     expect((screen.getByRole('button', { name: 'Remove photo 1 from Parish Life' }) as HTMLButtonElement).disabled).toBe(true)
