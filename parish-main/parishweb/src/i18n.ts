@@ -443,9 +443,6 @@ const tagalogTranslations: Record<string, string> = {
   'john@example.com': 'juan@halimbawa.com',
   '(555) 123-4567': '(02) 8123-4567',
 
-  // NewsPage / HomePage events
-  'Loading events…': 'Naglo-load ng mga kaganapan…',
-
   // ServicePage
   'Booking created.': 'Nagawa na ang appointment.',
   'Unable to create booking: services not loaded. Please refresh the page.': 'Hindi magawa ang appointment: hindi pa na-load ang mga serbisyo. I-refresh ang pahina.',
