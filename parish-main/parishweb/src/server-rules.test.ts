@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import {
   servicePolicy,
@@ -11,6 +12,21 @@ import {
   isValidGalleryContent,
   toCsv,
 } from '../server-rules.js';
+
+describe('PostgreSQL scheduled queries', () => {
+  const server = readFileSync('server.js', 'utf8');
+
+  it('quotes the case-sensitive FinancialEntries columns', () => {
+    expect(server).toContain(`WHEN "EntryType" <> 'Expense' THEN "Amount"`);
+    expect(server).toContain(`WHERE "EntryDate" BETWEEN $1 AND $2 AND "Status" IN`);
+  });
+
+  it('quotes the case-sensitive ServiceRequest columns in scheduled queries', () => {
+    expect(server).toContain(`SELECT "ServiceRequestId", "Status", "ScheduledDate", "ScheduledTime", "AttendanceStatus", "CreatedAt"`);
+    expect(server).toContain(`WHERE "ServiceRequestId"=$1 AND "Status"='Confirmed'`);
+    expect(server).toContain(`WHERE "ServiceRequestId"=$1 AND "Status"='PendingVerification'`);
+  });
+});
 
 describe('servicePolicy', () => {
   it('blocks Confirmation outside February', () => {

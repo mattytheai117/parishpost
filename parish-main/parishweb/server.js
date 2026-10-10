@@ -103,7 +103,7 @@ function previousCompletedPeriods(now = new Date()) {
 async function generateFinanceSnapshots() {
   const db = getPool();
   for (const period of previousCompletedPeriods()) {
-    const totals = await db.query(`SELECT COALESCE(SUM(CASE WHEN EntryType <> 'Expense' THEN Amount ELSE 0 END), 0) AS income, COALESCE(SUM(CASE WHEN EntryType = 'Expense' THEN Amount ELSE 0 END), 0) AS expenses FROM "FinancialEntries" WHERE EntryDate BETWEEN $1 AND $2 AND Status IN ('Approved','Reconciled')`, [period.start, period.end]);
+    const totals = await db.query(`SELECT COALESCE(SUM(CASE WHEN "EntryType" <> 'Expense' THEN "Amount" ELSE 0 END), 0) AS income, COALESCE(SUM(CASE WHEN "EntryType" = 'Expense' THEN "Amount" ELSE 0 END), 0) AS expenses FROM "FinancialEntries" WHERE "EntryDate" BETWEEN $1 AND $2 AND "Status" IN ('Approved','Reconciled')`, [period.start, period.end]);
     const row = totals.rows[0] || { income: 0, expenses: 0 };
     await db.query(`INSERT INTO "FinanceReportSnapshots" ("ReportType","PeriodStart","PeriodEnd","TotalIncome","TotalExpenses","NetTotal","Details","GeneratedBy")
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -128,9 +128,9 @@ async function voidNoShowAppointments() {
   const db = getPool();
   const now = new Date();
   const candidates = await db.query(`
-    SELECT ServiceRequestId, Status, ScheduledDate, ScheduledTime, AttendanceStatus, CreatedAt
+    SELECT "ServiceRequestId", "Status", "ScheduledDate", "ScheduledTime", "AttendanceStatus", "CreatedAt"
     FROM "ServiceRequest"
-    WHERE Status IN ('Confirmed', 'PendingVerification')
+    WHERE "Status" IN ('Confirmed', 'PendingVerification')
   `);
   const normalized = candidates.rows.map(row => ({
     id: row.ServiceRequestId,
@@ -143,10 +143,10 @@ async function voidNoShowAppointments() {
   const noShows = normalized.filter(row => isNoShowEligible(row, now));
   const expired = normalized.filter(row => isUnverifiedExpired(row, now));
   for (const row of noShows) {
-    await db.query(`UPDATE "ServiceRequest" SET Status='VoidedNoShow', AttendanceStatus='NoShow', "AttendanceMarkedAt" = NOW(), "VoidedAt" = NOW() WHERE ServiceRequestId=$1 AND Status='Confirmed'`, [row.id]);
+    await db.query(`UPDATE "ServiceRequest" SET "Status"='VoidedNoShow', "AttendanceStatus"='NoShow', "AttendanceMarkedAt" = NOW(), "VoidedAt" = NOW() WHERE "ServiceRequestId"=$1 AND "Status"='Confirmed'`, [row.id]);
   }
   for (const row of expired) {
-    await db.query(`UPDATE "ServiceRequest" SET Status='Voided', "VoidedAt" = NOW() WHERE ServiceRequestId=$1 AND Status='PendingVerification'`, [row.id]);
+    await db.query(`UPDATE "ServiceRequest" SET "Status"='Voided', "VoidedAt" = NOW() WHERE "ServiceRequestId"=$1 AND "Status"='PendingVerification'`, [row.id]);
   }
   if (noShows.length || expired.length) {
     logger.info('Automatic appointment voiding completed', { noShows: noShows.length, expiredUnverified: expired.length });
