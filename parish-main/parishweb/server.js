@@ -2043,9 +2043,9 @@ app.get('/api/admin/prayers', requireAdmin, requireRole(['ParishPriest', 'Secret
   try {
     const pool = getPool();
     const result = await pool.query(`
-      SELECT PrayerId, Name, Category, Request, Anonymous, ShareWithCommunity, IsApproved, CreatedAt
+      SELECT "PrayerId", "Name", "Category", "Request", "Anonymous", "ShareWithCommunity", "IsApproved", "CreatedAt"
       FROM "PrayerRequests"
-      ORDER BY CreatedAt DESC
+      ORDER BY "CreatedAt" DESC
     `);
 
     const prayers = result.rows.map(row => ({
@@ -2074,7 +2074,7 @@ app.delete('/api/prayers/:prayerId', requireAdmin, requireRole(['ParishPriest', 
     
     await pool.query(`
       DELETE FROM "PrayerRequests"
-      WHERE PrayerId = $1
+      WHERE "PrayerId" = $1
     `, [prayerId]);
 
     res.json({ success: true });
@@ -2738,9 +2738,9 @@ app.post('/api/prayers', async (req, res) => {
     const pool = getPool();
     
     const result = await pool.query(`
-      INSERT INTO "PrayerRequests" (Name, Category, Request, Anonymous, ShareWithCommunity, CreatedAt, IsApproved)
+      INSERT INTO "PrayerRequests" ("Name", "Category", "Request", "Anonymous", "ShareWithCommunity", "CreatedAt", "IsApproved")
+      VALUES ($1, $2, $3, $4, $5, NOW(), FALSE)
       RETURNING "PrayerId"
-      VALUES ($1, $2, $3, $4, $5, NOW(), 0)
     `, [String(name || ''), String(category || 'other'), String(request), anonymous ? 1 : 0, shareWithCommunity ? 1 : 0]);
 
     res.json({
@@ -2757,10 +2757,10 @@ app.get('/api/prayers', async (_req, res) => {
   try {
     const pool = getPool();
     const result = await pool.query(`
-      SELECT PrayerId, Name, Category, Request, ShareWithCommunity, CreatedAt
+      SELECT "PrayerId", "Name", "Category", "Request", "ShareWithCommunity", "CreatedAt"
       FROM "PrayerRequests"
-      WHERE IsApproved = 1 AND ShareWithCommunity = 1
-      ORDER BY CreatedAt DESC
+      WHERE "IsApproved" = TRUE AND "ShareWithCommunity" = TRUE
+      ORDER BY "CreatedAt" DESC
     `);
 
     const prayers = result.rows.map(row => ({
@@ -2789,9 +2789,9 @@ app.get('/api/prayers/:prayerId', async (req, res) => {
     const pool = getPool();
     
     const result = await pool.query(`
-      SELECT PrayerId, Name, Category, Request, CreatedAt
+      SELECT "PrayerId", "Name", "Category", "Request", "CreatedAt"
       FROM "PrayerRequests"
-      WHERE PrayerId = $1 AND "IsApproved" = TRUE AND "ShareWithCommunity" = TRUE
+      WHERE "PrayerId" = $1 AND "IsApproved" = TRUE AND "ShareWithCommunity" = TRUE
     `, [prayerId]);
 
     if (result.rows.length === 0) {
