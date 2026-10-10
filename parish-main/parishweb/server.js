@@ -379,7 +379,7 @@ async function requireAdmin(req, res, next) {
   if (staff && staff.userId > 0) {
     // Roles can change after sign-in, so use the current database role instead of the one baked into the token.
     try {
-      const result = await getPool().query('SELECT r.Name FROM "AspNetUserRoles" ur INNER JOIN "AspNetRoles" r ON r.RoleId = ur.RoleId WHERE ur.UserId = $1', [staff.userId]);
+      const result = await getPool().query('SELECT r."Name" FROM "AspNetUserRoles" ur INNER JOIN "AspNetRoles" r ON r."RoleId" = ur."RoleId" WHERE ur."UserId" = $1', [staff.userId]);
       const names = result.rows.map(row => row.Name);
       const current = staffRolePriority.find(name => names.includes(name));
       if (!current) return res.status(403).json({ message: 'Admin token is required.' });
@@ -390,7 +390,7 @@ async function requireAdmin(req, res, next) {
     try {
       const [overrides, account] = await Promise.all([
         getPool().query('SELECT ModuleName, CanView, CanEdit FROM "UserModulePermissions" WHERE UserId = $1', [staff.userId]),
-        getPool().query('SELECT MustChangePassword FROM "AspNetUsers" WHERE UserId = $1', [staff.userId]),
+        getPool().query('SELECT "MustChangePassword" FROM "AspNetUsers" WHERE "UserId" = $1', [staff.userId]),
       ]);
       staff.overrides = Object.fromEntries(overrides.rows.map(row => [row.ModuleName, { view: Boolean(row.CanView), edit: Boolean(row.CanEdit) }]));
       staff.mustChangePassword = Boolean(account.rows[0]?.MustChangePassword);
@@ -1626,11 +1626,11 @@ app.post('/api/admin/login', authRateLimit, async (req, res) => {
 
   try {
     const result = await getPool().query(`
-        SELECT u.UserId, u.EmailAddress, u.PasswordHash, u.MustChangePassword, r.Name AS RoleName
+        SELECT u."UserId", u."EmailAddress", u."PasswordHash", u."MustChangePassword", r."Name" AS "RoleName"
         FROM "AspNetUsers" u
-        INNER JOIN "AspNetUserRoles" ur ON ur.UserId = u.UserId
-        INNER JOIN "AspNetRoles" r ON r.RoleId = ur.RoleId
-        WHERE u.EmailAddress = $1
+        INNER JOIN "AspNetUserRoles" ur ON ur."UserId" = u."UserId"
+        INNER JOIN "AspNetRoles" r ON r."RoleId" = ur."RoleId"
+        WHERE u."EmailAddress" = $1
       `, [email]);
     const user = result.rows[0];
 
@@ -1663,7 +1663,7 @@ app.get('/api/admin/verify', requireAdmin, async (req, res) => {
   let profile = { userName: '', email: '' };
   if (staff.userId > 0) {
     try {
-      const result = await getPool().query('SELECT UserName, EmailAddress FROM "AspNetUsers" WHERE UserId = $1', [staff.userId]);
+      const result = await getPool().query('SELECT "UserName", "EmailAddress" FROM "AspNetUsers" WHERE "UserId" = $1', [staff.userId]);
       const row = result.rows[0];
       if (row) profile = { userName: row.UserName, email: row.EmailAddress };
     } catch (error) {
@@ -1697,12 +1697,12 @@ app.post('/api/admin/change-password', authRateLimit, requireAdmin, async (req, 
     return res.status(400).json({ message: 'Choose a new password that is different from your current and default password.' });
   }
   try {
-    const result = await getPool().query('SELECT UserName, PasswordHash FROM "AspNetUsers" WHERE UserId = $1', [req.staff.userId]);
+    const result = await getPool().query('SELECT "UserName", "PasswordHash" FROM "AspNetUsers" WHERE "UserId" = $1', [req.staff.userId]);
     const user = result.rows[0];
     if (!user || !verifyAspNetPassword(currentPassword, user.PasswordHash)) {
       return res.status(401).json({ message: 'Your current password is incorrect.' });
     }
-    const updateResult = await getPool().query('UPDATE "AspNetUsers" SET PasswordHash = $2, "MustChangePassword" = FALSE WHERE UserId = $1', [req.staff.userId, hashAspNetPassword(newPassword)]);
+    const updateResult = await getPool().query('UPDATE "AspNetUsers" SET "PasswordHash" = $2, "MustChangePassword" = FALSE WHERE "UserId" = $1', [req.staff.userId, hashAspNetPassword(newPassword)]);
     if (updateResult.rowCount !== 1) {
       return res.status(500).json({ message: 'Unable to change password.' });
     }
@@ -1729,9 +1729,9 @@ app.put('/api/admin/profile', requireAdmin, async (req, res) => {
     return res.status(400).json({ message: 'A username and valid email address are required.' });
   }
   try {
-    const duplicate = await getPool().query('SELECT UserId FROM "AspNetUsers" WHERE EmailAddress = $2 AND UserId <> $1', [req.staff.userId, email]);
+    const duplicate = await getPool().query('SELECT "UserId" FROM "AspNetUsers" WHERE "EmailAddress" = $2 AND "UserId" <> $1', [req.staff.userId, email]);
     if (duplicate.rows.length) return res.status(409).json({ message: 'Another account already uses this email address.' });
-    await getPool().query('UPDATE "AspNetUsers" SET UserName = $2, EmailAddress = $3 WHERE UserId = $1', [req.staff.userId, userName, email]);
+    await getPool().query('UPDATE "AspNetUsers" SET "UserName" = $2, "EmailAddress" = $3 WHERE "UserId" = $1', [req.staff.userId, userName, email]);
     return res.json({ userName, email });
   } catch (error) {
     logError(error, { context: 'updateOwnProfile' });
@@ -1765,7 +1765,7 @@ app.put('/api/admin/users/:id/permissions', requireAdmin, requireRole(['Admin'])
   let committed = false;
   try {
     await client.query('BEGIN');
-    const target = await transaction.query('SELECT UserName FROM "AspNetUsers" WHERE UserId = $1', [id]);
+    const target = await transaction.query('SELECT "UserName" FROM "AspNetUsers" WHERE "UserId" = $1', [id]);
     if (!target.rows[0]) {
       await transaction.rollback();
       transactionStarted = false;
@@ -1794,14 +1794,14 @@ app.put('/api/admin/users/:id/permissions', requireAdmin, requireRole(['Admin'])
 app.get('/api/admin/users', requireAdmin, requireRole(['Admin', 'ParishPriest', 'Secretary']), async (req, res) => {
   try {
     const result = await getPool().query(`
-      SELECT u.UserId AS userId, u.UserName AS userName,
-        CASE WHEN $1 = 1 THEN u.EmailAddress ELSE NULL END AS email,
-        u.EmailConfirmed AS emailConfirmed, FALSE AS lockoutEnabled,
-        0 AS accessFailedCount, COALESCE(r.Name, 'Staff') AS roleName
+      SELECT u."UserId" AS userId, u."UserName" AS userName,
+        CASE WHEN $1 = 1 THEN u."EmailAddress" ELSE NULL END AS email,
+        u."EmailConfirmed" AS emailConfirmed, FALSE AS lockoutEnabled,
+        0 AS accessFailedCount, COALESCE(r."Name", 'Staff') AS roleName
       FROM "AspNetUsers" u
-      LEFT JOIN "AspNetUserRoles" ur ON ur.UserId = u.UserId
-      LEFT JOIN "AspNetRoles" r ON r.RoleId = ur.RoleId
-      ORDER BY u.UserName
+      LEFT JOIN "AspNetUserRoles" ur ON ur."UserId" = u."UserId"
+      LEFT JOIN "AspNetRoles" r ON r."RoleId" = ur."RoleId"
+      ORDER BY u."UserName"
     `, [req.staff.role === 'Admin']);
     const users = result.rows.reduce((items, row) => {
       const item = items.find(value => value.userId === row.userId);
@@ -1844,13 +1844,13 @@ app.post('/api/admin/users', requireAdmin, requireRole(['Admin']), async (req, r
   let committed = false;
   try {
     const db = getPool();
-    const roleResult = await db.query('SELECT RoleId FROM "AspNetRoles" WHERE Name = $1', [selectedRole]);
+    const roleResult = await db.query('SELECT "RoleId" FROM "AspNetRoles" WHERE "Name" = $1', [selectedRole]);
     if (!roleResult.rows[0]) {
       return res.status(500).json({ message: 'Role is not configured in the database.' });
     }
 
     await client.query('BEGIN');
-    const duplicate = await transaction.query('SELECT UserId FROM "AspNetUsers" WHERE EmailAddress = $1', [normalizedEmail]);
+    const duplicate = await transaction.query('SELECT "UserId" FROM "AspNetUsers" WHERE "EmailAddress" = $1', [normalizedEmail]);
     if (duplicate.rows.length) {
       await transaction.rollback();
       transactionStarted = false;
@@ -1858,13 +1858,13 @@ app.post('/api/admin/users', requireAdmin, requireRole(['Admin']), async (req, r
     }
 
     const user = await transaction.query(`
-        INSERT INTO "AspNetUsers" (UserName, EmailAddress, EmailConfirmed, PasswordHash, MustChangePassword)
+        INSERT INTO "AspNetUsers" ("UserName", "EmailAddress", "EmailConfirmed", "PasswordHash", "MustChangePassword")
+        VALUES ($1, $2, TRUE, $3, TRUE)
         RETURNING "UserId"
-        VALUES ($1, $2, 1, $3, 1)
       `, [username, normalizedEmail, hashAspNetPassword(password)]);
     const userId = user.rows[0].UserId;
 
-    await transaction.query('INSERT INTO "AspNetUserRoles" (UserId, RoleId) VALUES ($1, $2)', [userId, roleResult.rows[0].RoleId]);
+    await transaction.query('INSERT INTO "AspNetUserRoles" ("UserId", "RoleId") VALUES ($1, $2)', [userId, roleResult.rows[0].RoleId]);
     await transaction.query(`
         INSERT INTO "UserManagementAudit" (ActionName, TargetUserId, TargetUserName, ChangedBy, Details)
         VALUES ($1, $2, $3, $4, $5)
@@ -1925,7 +1925,7 @@ app.put('/api/admin/users/:id', requireAdmin, requireRole(['Admin', 'ParishPries
     const roleIds = [];
     if (requestedRoles) {
       for (const name of [...new Set(requestedRoles)]) {
-        const roleRow = await db.query('SELECT RoleId FROM "AspNetRoles" WHERE Name = $1', [name]);
+        const roleRow = await db.query('SELECT "RoleId" FROM "AspNetRoles" WHERE "Name" = $1', [name]);
         if (!roleRow.rows[0]) {
           return res.status(400).json({ message: `Role ${name} is not configured.` });
         }
@@ -1935,14 +1935,14 @@ app.put('/api/admin/users/:id', requireAdmin, requireRole(['Admin', 'ParishPries
 
     await client.query('BEGIN');
     const targetResult = await transaction.query(`
-        SELECT u.UserName, u.EmailAddress,
+        SELECT u."UserName", u."EmailAddress",
           CASE WHEN EXISTS (
             SELECT 1 FROM "AspNetUserRoles" ur
-            INNER JOIN "AspNetRoles" r ON r.RoleId = ur.RoleId
-            WHERE ur.UserId = u.UserId AND r.Name = 'Admin'
-          ) THEN 1 ELSE 0 END AS IsAdmin
+            INNER JOIN "AspNetRoles" r ON r."RoleId" = ur."RoleId"
+            WHERE ur."UserId" = u."UserId" AND r."Name" = 'Admin'
+          ) THEN 1 ELSE 0 END AS "IsAdmin"
         FROM "AspNetUsers" u
-        WHERE u.UserId = $1
+        WHERE u."UserId" = $1
       `, [id]);
     const target = targetResult.rows[0];
     if (!target) {
@@ -1957,16 +1957,16 @@ app.put('/api/admin/users/:id', requireAdmin, requireRole(['Admin', 'ParishPries
     }
 
     if (hasEmail) {
-      const duplicate = await transaction.query('SELECT UserId FROM "AspNetUsers" WHERE EmailAddress = $2 AND UserId <> $1', [id, email]);
+      const duplicate = await transaction.query('SELECT "UserId" FROM "AspNetUsers" WHERE "EmailAddress" = $2 AND "UserId" <> $1', [id, email]);
       if (duplicate.rows.length) {
         await transaction.rollback();
         transactionStarted = false;
         return res.status(409).json({ message: 'Another account already uses this email address.' });
       }
-      await transaction.query('UPDATE "AspNetUsers" SET EmailAddress = $2 WHERE UserId = $1', [id, email]);
+      await transaction.query('UPDATE "AspNetUsers" SET "EmailAddress" = $2 WHERE "UserId" = $1', [id, email]);
     }
     if (hasPassword) {
-      await transaction.query('UPDATE "AspNetUsers" SET PasswordHash = $2, "MustChangePassword" = TRUE WHERE UserId = $1', [id, hashAspNetPassword(password)]);
+      await transaction.query('UPDATE "AspNetUsers" SET "PasswordHash" = $2, "MustChangePassword" = TRUE WHERE "UserId" = $1', [id, hashAspNetPassword(password)]);
     }
     if (requestedRoles) {
       await transaction.query('DELETE FROM "AspNetUserRoles" WHERE UserId = $1', [id]);
@@ -2009,7 +2009,7 @@ app.delete('/api/admin/users/:id', requireAdmin, requireRole(['Admin']), async (
   try {
     const db = getPool();
     await client.query('BEGIN');
-    const targetResult = await transaction.query('SELECT UserName, EmailAddress FROM "AspNetUsers" WHERE UserId = $1', [id]);
+    const targetResult = await transaction.query('SELECT "UserName", "EmailAddress" FROM "AspNetUsers" WHERE "UserId" = $1', [id]);
     const target = targetResult.rows[0];
     if (!target) {
       await transaction.rollback();
